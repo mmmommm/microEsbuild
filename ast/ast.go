@@ -62,7 +62,7 @@ func (kind ImportKind) IsFromCSS() bool {
 }
 
 type ImportRecord struct {
-	Range      location.Range
+	Range location.Range
 	//Path       location.Path
 	Assertions *[]AssertEntry
 
@@ -141,7 +141,6 @@ func (i Index32) IsValid() bool {
 func (i Index32) GetIndex() uint32 {
 	return ^i.flippedBits
 }
-
 
 // Every module (i.e. file) is parsed into a separate AST data structure. For
 // efficiency, the parser also resolves all scopes and binds all symbols in the

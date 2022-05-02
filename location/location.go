@@ -43,7 +43,6 @@ type Span struct {
 
 // type PathFlags uint8
 
-
 type Source struct {
 	// This is used for error messages and the metadata JSON file.
 	//
