@@ -416,7 +416,7 @@ func (p *parser) parseStmt() ast.Stmt {
 
 			// Handle the default export of an abstract class in TypeScript
 			if isIdentifier && name == "abstract" {
-				if _, ok := expr.Data.(*ast.EIdentifier); ok && (p.lexer.Token == lexer.TClass || opts.tsDecorators != nil) {
+				if _, ok := expr.Data.(*ast.EIdentifier); ok && (p.lexer.Token == lexer.TClass) {
 
 					// Use the statement name if present, since it's a better name
 					var defaultName ast.LocRef
@@ -436,14 +436,10 @@ func (p *parser) parseStmt() ast.Stmt {
 				DefaultName: defaultName, Value: ast.Stmt{Loc: loc, Data: &ast.SExpr{Value: expr}}}}
 
 		case lexer.TAsterisk:
-			if !opts.isModuleScope && (!opts.isNamespaceScope || !opts.isTypeScriptDeclare) {
-				p.lexer.Unexpected()
-			}
-
 			p.lexer.Next()
 			var namespaceRef ast.Ref
 			var alias *ast.ExportStarAlias
-			var pathLoc logger.Loc
+			var pathLoc location.Loc
 			var pathText string
 			var assertions *[]ast.AssertEntry
 
@@ -504,14 +500,12 @@ func (p *parser) parseStmt() ast.Stmt {
 
 		case lexer.TEquals:
 			// "export = value;"
-			p.esmExportKeyword = previousExportKeyword // This wasn't an ESM export statement after all
-			if p.options.ts.Parse {
-				p.lexer.Next()
-				value := p.parseExpr(ast.LLowest)
-				p.lexer.ExpectOrInsertSemicolon()
-				return ast.Stmt{Loc: loc, Data: &ast.SExportEquals{Value: value}}
-			}
-			p.lexer.Unexpected()
+			// p.esmExportKeyword = previousExportKeyword // This wasn't an ESM export statement after all
+			p.lexer.Next()
+			value := p.parseExpr(ast.LLowest)
+			p.lexer.ExpectOrInsertSemicolon()
+			return ast.Stmt{Loc: loc, Data: &ast.SExportEquals{Value: value}}
+		p.lexer.Unexpected()
 			return ast.Stmt{}
 
 		default:
@@ -523,7 +517,7 @@ func (p *parser) parseStmt() ast.Stmt {
 		return p.parseFnStmt(loc, false /* isAsync */, location.Range{})
 
 	case lexer.TEnum:
-		return p.parseTypeScriptEnumStmt(loc)
+		return p.parseTsEnumStmt(loc)
 
 	case lexer.TAt:
 		// Parse decorators before class statements, which are potentially exported
@@ -570,25 +564,20 @@ func (p *parser) parseStmt() ast.Stmt {
 		}}
 
 	case lexer.TConst:
-		if opts.lexicalDecl != lexicalDeclAllowAll {
-			p.forbidLexicalDecl(loc)
-		}
+		p.forbidLexicalDecl(loc)
 		p.markSyntaxFeature(compat.Const, p.lexer.Range())
 		p.lexer.Next()
 
 		if p.options.ts.Parse && p.lexer.Token == lexer.TEnum {
-			return p.parseTypeScriptEnumStmt(loc, opts)
+			return p.parseTypeScriptEnumStmt(loc)
 		}
 
-		decls := p.parseAndDeclareDecls(ast.SymbolConst, opts)
+		decls := p.parseAndDeclareDecls(ast.SymbolConst)
 		p.lexer.ExpectOrInsertSemicolon()
-		if !opts.isTypeScriptDeclare {
-			p.requireInitializers(decls)
-		}
+		p.requireInitializers(decls)
 		return ast.Stmt{Loc: loc, Data: &ast.SLocal{
 			Kind:     ast.LocalConst,
 			Decls:    decls,
-			IsExport: opts.isExport,
 		}}
 
 	case lexer.TIf:
@@ -596,17 +585,17 @@ func (p *parser) parseStmt() ast.Stmt {
 		p.lexer.Expect(lexer.TOpenParen)
 		test := p.parseExpr(ast.LLowest)
 		p.lexer.Expect(lexer.TCloseParen)
-		yes := p.parseStmt(parseStmtOpts{lexicalDecl: lexicalDeclAllowFnInsideIf})
+		yes := p.parseStmt()
 		var noOrNil ast.Stmt
 		if p.lexer.Token == lexer.TElse {
 			p.lexer.Next()
-			noOrNil = p.parseStmt(parseStmtOpts{lexicalDecl: lexicalDeclAllowFnInsideIf})
+			noOrNil = p.parseStmt()
 		}
 		return ast.Stmt{Loc: loc, Data: &ast.SIf{Test: test, Yes: yes, NoOrNil: noOrNil}}
 
 	case lexer.TDo:
 		p.lexer.Next()
-		body := p.parseStmt(parseStmtOpts{})
+		body := p.parseStmt()
 		p.lexer.Expect(lexer.TWhile)
 		p.lexer.Expect(lexer.TOpenParen)
 		test := p.parseExpr(ast.LLowest)
@@ -624,7 +613,7 @@ func (p *parser) parseStmt() ast.Stmt {
 		p.lexer.Expect(lexer.TOpenParen)
 		test := p.parseExpr(ast.LLowest)
 		p.lexer.Expect(lexer.TCloseParen)
-		body := p.parseStmt(parseStmtOpts{})
+		body := p.parseStmt()
 		return ast.Stmt{Loc: loc, Data: &ast.SWhile{Test: test, Body: body}}
 
 	case lexer.TWith:
@@ -638,7 +627,7 @@ func (p *parser) parseStmt() ast.Stmt {
 		// within the body from being renamed. Renaming them might change the
 		// semantics of the code.
 		p.pushScopeForParsePass(ast.ScopeWith, bodyLoc)
-		body := p.parseStmt(parseStmtOpts{})
+		body := p.parseStmt()
 		p.popScope()
 
 		return ast.Stmt{Loc: loc, Data: &ast.SWith{Value: test, BodyLoc: bodyLoc, Body: body}}
@@ -663,7 +652,6 @@ func (p *parser) parseStmt() ast.Stmt {
 
 			if p.lexer.Token == lexer.TDefault {
 				if foundDefault {
-					p.log.Add(logger.Error, &p.tracker, p.lexer.Range(), "Multiple default clauses are not allowed")
 					panic(lexer.LexerPanic{})
 				}
 				foundDefault = true
@@ -682,7 +670,7 @@ func (p *parser) parseStmt() ast.Stmt {
 					break caseBody
 
 				default:
-					body = append(body, p.parseStmt(parseStmtOpts{lexicalDecl: lexicalDeclAllowAll}))
+					body = append(body, p.parseStmt())
 				}
 			}
 
@@ -701,7 +689,7 @@ func (p *parser) parseStmt() ast.Stmt {
 		blockLoc := p.lexer.Loc()
 		p.lexer.Expect(lexer.TOpenBrace)
 		p.pushScopeForParsePass(ast.ScopeBlock, loc)
-		body := p.parseStmtsUpTo(lexer.TCloseBrace, parseStmtOpts{})
+		body := p.parseStmtsUpTo(lexer.TCloseBrace)
 		p.popScope()
 		closeBraceLoc := p.lexer.Loc()
 		p.lexer.Next()
@@ -717,20 +705,18 @@ func (p *parser) parseStmt() ast.Stmt {
 
 			// The catch binding is optional, and can be omitted
 			if p.lexer.Token == lexer.TOpenBrace {
-				if p.options.unsupportedJSFeatures.Has(compat.OptionalCatchBinding) {
 					// Generate a new symbol for the catch binding for older browsers
 					ref := p.newSymbol(ast.SymbolOther, "e")
 					p.currentScope.Generated = append(p.currentScope.Generated, ref)
 					bindingOrNil = ast.Binding{Loc: p.lexer.Loc(), Data: &ast.BIdentifier{Ref: ref}}
-				}
 			} else {
 				p.lexer.Expect(lexer.TOpenParen)
 				bindingOrNil = p.parseBinding()
 
 				// Skip over types
-				if p.options.ts.Parse && p.lexer.Token == lexer.TColon {
+				if p.lexer.Token == lexer.TColon {
 					p.lexer.Expect(lexer.TColon)
-					p.skipTypeScriptType(ast.LLowest)
+					p.skipTsType(ast.LLowest)
 				}
 
 				p.lexer.Expect(lexer.TCloseParen)
@@ -740,14 +726,14 @@ func (p *parser) parseStmt() ast.Stmt {
 				if _, ok := bindingOrNil.Data.(*ast.BIdentifier); ok {
 					kind = ast.SymbolCatchIdentifier
 				}
-				p.declareBinding(kind, bindingOrNil, parseStmtOpts{})
+				p.declareBinding(kind, bindingOrNil)
 			}
 
 			blockLoc := p.lexer.Loc()
 			p.lexer.Expect(lexer.TOpenBrace)
 
 			p.pushScopeForParsePass(ast.ScopeBlock, blockLoc)
-			stmts := p.parseStmtsUpTo(lexer.TCloseBrace, parseStmtOpts{})
+			stmts := p.parseStmtsUpTo(lexer.TCloseBrace)
 			p.popScope()
 
 			closeBraceLoc := p.lexer.Loc()
@@ -761,7 +747,7 @@ func (p *parser) parseStmt() ast.Stmt {
 			p.pushScopeForParsePass(ast.ScopeBlock, finallyLoc)
 			p.lexer.Expect(lexer.TFinally)
 			p.lexer.Expect(lexer.TOpenBrace)
-			stmts := p.parseStmtsUpTo(lexer.TCloseBrace, parseStmtOpts{})
+			stmts := p.parseStmtsUpTo(lexer.TCloseBrace)
 			closeBraceLoc := p.lexer.Loc()
 			p.lexer.Next()
 			finally = &ast.Finally{Loc: finallyLoc, Block: ast.SBlock{Stmts: stmts, CloseBraceLoc: closeBraceLoc}}
@@ -786,7 +772,6 @@ func (p *parser) parseStmt() ast.Stmt {
 		if isForAwait {
 			awaitRange := p.lexer.Range()
 			if p.fnOrArrowDataParse.await != allowExpr {
-				p.log.Add(logger.Error, &p.tracker, awaitRange, "Cannot use \"await\" outside an async function")
 				isForAwait = false
 			} else {
 				didGenerateError := p.markSyntaxFeature(compat.ForAwait, awaitRange)
@@ -807,7 +792,7 @@ func (p *parser) parseStmt() ast.Stmt {
 		// "in" expressions aren't allowed here
 		p.allowIn = false
 
-		var badLetRange logger.Range
+		var badLetRange location.Range
 		if p.lexer.IsContextualKeyword("let") {
 			badLetRange = p.lexer.Range()
 		}
@@ -838,7 +823,7 @@ func (p *parser) parseStmt() ast.Stmt {
 				isForAwaitLoopInit: isForAwait,
 			})
 			if stmt.Data != nil {
-				badLetRange = logger.Range{}
+				badLetRange = location.Range{}
 				initOrNil = stmt
 			} else {
 				initOrNil = ast.Stmt{Loc: initLoc, Data: &ast.SExpr{Value: expr}}
@@ -850,9 +835,6 @@ func (p *parser) parseStmt() ast.Stmt {
 
 		// Detect for-of loops
 		if p.lexer.IsContextualKeyword("of") || isForAwait {
-			if badLetRange.Len > 0 {
-				p.log.Add(logger.Error, &p.tracker, badLetRange, "\"let\" must be wrapped in parentheses to be used as an expression here:")
-			}
 			if isForAwait && !p.lexer.IsContextualKeyword("of") {
 				if initOrNil.Data != nil {
 					p.lexer.ExpectedString("\"of\"")
@@ -865,7 +847,7 @@ func (p *parser) parseStmt() ast.Stmt {
 			p.lexer.Next()
 			value := p.parseExpr(ast.LComma)
 			p.lexer.Expect(lexer.TCloseParen)
-			body := p.parseStmt(parseStmtOpts{})
+			body := p.parseStmt()
 			return ast.Stmt{Loc: loc, Data: &ast.SForOf{IsAwait: isForAwait, Init: initOrNil, Value: value, Body: body}}
 		}
 
@@ -875,7 +857,7 @@ func (p *parser) parseStmt() ast.Stmt {
 			p.lexer.Next()
 			value := p.parseExpr(ast.LLowest)
 			p.lexer.Expect(lexer.TCloseParen)
-			body := p.parseStmt(parseStmtOpts{})
+			body := p.parseStmt()
 			return ast.Stmt{Loc: loc, Data: &ast.SForIn{Init: initOrNil, Value: value, Body: body}}
 		}
 
@@ -914,7 +896,7 @@ func (p *parser) parseStmt() ast.Stmt {
 
 		// "export import foo = bar"
 		// "import foo = bar" in a namespace
-		if (opts.isExport || (opts.isNamespaceScope && !opts.isTypeScriptDeclare)) && p.lexer.Token != lexer.TIdentifier {
+		if (p.lexer.Token != lexer.TIdentifier) {
 			p.lexer.Expected(lexer.TIdentifier)
 		}
 
@@ -929,19 +911,11 @@ func (p *parser) parseStmt() ast.Stmt {
 
 		case lexer.TStringLiteral, lexer.TNoSubstitutionTemplateLiteral:
 			// "import 'path'"
-			if !opts.isModuleScope && (!opts.isNamespaceScope || !opts.isTypeScriptDeclare) {
-				p.lexer.Unexpected()
-				return ast.Stmt{}
-			}
 
 			wasOriginallyBareImport = true
 
 		case lexer.TAsterisk:
 			// "import * as ns from 'path'"
-			if !opts.isModuleScope && (!opts.isNamespaceScope || !opts.isTypeScriptDeclare) {
-				p.lexer.Unexpected()
-				return ast.Stmt{}
-			}
 
 			p.lexer.Next()
 			p.lexer.ExpectContextualKeyword("as")
@@ -953,10 +927,6 @@ func (p *parser) parseStmt() ast.Stmt {
 
 		case lexer.TOpenBrace:
 			// "import {item1, item2} from 'path'"
-			if !opts.isModuleScope && (!opts.isNamespaceScope || !opts.isTypeScriptDeclare) {
-				p.lexer.Unexpected()
-				return ast.Stmt{}
-			}
 
 			items, isSingleLine := p.parseImportClause()
 			stmt.Items = &items
@@ -966,16 +936,11 @@ func (p *parser) parseStmt() ast.Stmt {
 		case lexer.TIdentifier:
 			// "import defaultItem from 'path'"
 			// "import foo = bar"
-			if !opts.isModuleScope && !opts.isNamespaceScope {
-				p.lexer.Unexpected()
-				return ast.Stmt{}
-			}
 
 			defaultName := p.lexer.Identifier
 			stmt.DefaultName = &ast.LocRef{Loc: p.lexer.Loc(), Ref: p.storeNameInRef(defaultName)}
 			p.lexer.Next()
 
-			if p.options.ts.Parse {
 				// Skip over type-only imports
 				if defaultName.String == "type" {
 					switch p.lexer.Token {
@@ -987,7 +952,6 @@ func (p *parser) parseStmt() ast.Stmt {
 							if p.lexer.Token == lexer.TEquals {
 								// "import type foo = require('bar');"
 								// "import type foo = bar.baz;"
-								opts.isTypeScriptDeclare = true
 								return p.parseTypeScriptImportEqualsStmt(loc, opts, stmt.DefaultName.Loc, defaultName.String)
 							} else {
 								// "import type foo from 'bar';"
@@ -1019,11 +983,10 @@ func (p *parser) parseStmt() ast.Stmt {
 				}
 
 				// Parse TypeScript import assignment statements
-				if p.lexer.Token == lexer.TEquals || opts.isExport || (opts.isNamespaceScope && !opts.isTypeScriptDeclare) {
+				if (p.lexer.Token == lexer.TEquals) {
 					p.esmImportStatementKeyword = previousImportStatementKeyword // This wasn't an ESM import statement after all
 					return p.parseTypeScriptImportEqualsStmt(loc, opts, stmt.DefaultName.Loc, defaultName.String)
 				}
-			}
 
 			if p.lexer.Token == lexer.TComma {
 				p.lexer.Next()
