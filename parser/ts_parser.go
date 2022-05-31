@@ -654,65 +654,6 @@ func (p *parser) skipTsTypeStmt() {
 	p.lexer.ExpectOrInsertSemicolon()
 }
 
-// func (p *parser) parseTypeScriptDecorators(tsDecoratorScope *ast.Scope) []ast.Expr {
-// 	var tsDecorators []ast.Expr
-
-// 	// TypeScript decorators cause us to temporarily revert to the scope that
-// 	// encloses the class declaration, since that's where the generated code
-// 	// for TypeScript decorators will be inserted.
-// 	oldScope := p.currentScope
-// 	p.currentScope = tsDecoratorScope
-
-// 	for p.lexer.Token == lexer.TAt {
-// 		loc := p.lexer.Loc()
-// 		p.lexer.Next()
-
-// 		// Parse a new/call expression with "exprFlagTSDecorator" so we ignore
-// 		// EIndex expressions, since they may be part of a computed property:
-// 		//
-// 		//   class Foo {
-// 		//     @foo ['computed']() {}
-// 		//   }
-// 		//
-// 		// This matches the behavior of the TypeScript compiler.
-// 		value := p.parseExprWithFlags(ast.LNew, exprFlagTSDecorator)
-// 		value.Loc = loc
-// 		tsDecorators = append(tsDecorators, value)
-// 	}
-
-// 	// Avoid "popScope" because this decorator scope is not hierarchical
-// 	p.currentScope = oldScope
-
-// 	return tsDecorators
-// }
-
-// func (p *parser) logInvalidDecoratorError(classKeyword location.Range) {
-// 	if p.lexer.Token == lexer.TAt {
-// 		// Forbid decorators inside class expressions
-// 		// p.lexer.AddRangeErrorWithNotes(p.lexer.Range(), "Decorators can only be used with class declarations in TypeScript",
-// 		// 	[]location.MsgData{p.tracker.MsgData(classKeyword, "This is a class expression, not a class declaration:")})
-
-// 		// Parse and discard decorators for error recovery
-// 		scopeIndex := len(p.scopesInOrder)
-// 		p.parseTypeScriptDecorators(p.currentScope)
-// 		p.discardScopesUpTo(scopeIndex)
-// 	}
-// }
-
-// // func (p *parser) logMisplacedDecoratorError(tsDecorators *deferredTSDecorators) {
-// // 	found := fmt.Sprintf("%q", p.lexer.Raw())
-// // 	if p.lexer.Token == lexer.TEndOfFile {
-// // 		found = "end of file"
-// // 	}
-
-// // 	// Try to be helpful by pointing out the decorator
-// // 	//p.lexer.AddRangeErrorWithNotes(p.lexer.Range(), fmt.Sprintf("Expected \"class\" after TypeScript decorator but found %s", found), []location.MsgData{
-// // 		// p.tracker.MsgData(location.Range{Loc: tsDecorators.values[0].Loc}, "The preceding TypeScript decorator is here:"),
-// // 		// {Text: "Decorators can only be used with class declarations in TypeScript."},
-// // 	//})
-// // 	p.discardScopesUpTo(tsDecorators.scopeIndex)
-// }
-
 // func (p *parser) parseTypeScriptEnumStmt(loc location.Loc, opts parseStmtOpts) ast.Stmt {
 // 	p.lexer.Expect(lexer.TEnum)
 // 	nameLoc := p.lexer.Loc()
