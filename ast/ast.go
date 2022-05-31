@@ -62,7 +62,7 @@ func (kind ImportKind) IsFromCSS() bool {
 }
 
 type ImportRecord struct {
-	Range      location.Range
+	Range location.Range
 	//Path       location.Path
 	Assertions *[]AssertEntry
 
@@ -141,7 +141,6 @@ func (i Index32) IsValid() bool {
 func (i Index32) GetIndex() uint32 {
 	return ^i.flippedBits
 }
-
 
 // Every module (i.e. file) is parsed into a separate AST data structure. For
 // efficiency, the parser also resolves all scopes and binds all symbols in the
@@ -1468,6 +1467,11 @@ type Decl struct {
 type SymbolKind uint8
 
 const (
+
+	// Certain symbols must not be renamed or minified. For example, the
+	// "arguments" variable is declared by the runtime for every function.
+	// Renaming can also break any identifier used inside a "with" statement.
+	MustNotBeRenamed SymbolFlags = 1 << iota
 	// An unbound symbol is one that isn't declared in the file it's referenced
 	// in. For example, using "window" without declaring it will be unbound.
 	SymbolUnbound SymbolKind = iota
@@ -1621,6 +1625,12 @@ const (
 	ImportItemMissing
 )
 
+type SymbolFlags uint16
+
+func (flags SymbolFlags) Has(flag SymbolFlags) bool {
+	return (flags & flag) != 0
+}
+
 // Note: the order of values in this struct matters to reduce struct size.
 type Symbol struct {
 	// This is the name that came from the parser. Printed names may be renamed
@@ -1669,6 +1679,9 @@ type Symbol struct {
 	// The parser fills this in for symbols inside nested scopes. There are three
 	// slot namespaces: regular symbols, label symbols, and private symbols.
 	NestedScopeSlot Index32
+
+	// Boolean values should all be flags instead to save space
+	Flags SymbolFlags
 
 	Kind SymbolKind
 

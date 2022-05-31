@@ -24,6 +24,10 @@ import (
 	"github.com/mmmommm/microEsbuild/location"
 )
 
+func (lexer *Lexer) rawIdentifier() MaybeSubstring {
+	return MaybeSubstring{lexer.Raw(), ast.MakeIndex32(uint32(lexer.start))}
+}
+
 func RemoveMultiLineCommentIndent(prefix string, text string) string {
 	// Figure out the initial indent
 	indent := 0
@@ -276,30 +280,35 @@ type json struct {
 	allowComments bool
 }
 
+type MaybeSubstring struct {
+	String string
+	Start  ast.Index32
+}
+
 type Lexer struct {
 	// log                             location.Log
-	source                          location.Source
+	source location.Source
 	// tracker                         location.LineColumnTracker
-	current                         int
-	start                           int
-	end                             int
-	ApproximateNewlineCount         int
-	LegacyOctalLoc                  location.Loc
-	AwaitKeywordLoc                 location.Loc
-	FnOrArrowStartLoc               location.Loc
-	PreviousBackslashQuoteInJSX     location.Range
-	LegacyHTMLCommentRange          location.Range
-	Token                           T
-	HasNewlineBefore                bool
-	HasPureCommentBefore            bool
-	PreserveAllCommentsBefore       bool
-	IsLegacyOctalLiteral            bool
-	PrevTokenWasAwaitKeyword        bool
-	CommentsToPreserveBefore        []ast.Comment
-	AllOriginalComments             []ast.Comment
+	current                     int
+	start                       int
+	end                         int
+	ApproximateNewlineCount     int
+	LegacyOctalLoc              location.Loc
+	AwaitKeywordLoc             location.Loc
+	FnOrArrowStartLoc           location.Loc
+	PreviousBackslashQuoteInJSX location.Range
+	LegacyHTMLCommentRange      location.Range
+	Token                       T
+	HasNewlineBefore            bool
+	HasPureCommentBefore        bool
+	PreserveAllCommentsBefore   bool
+	IsLegacyOctalLiteral        bool
+	PrevTokenWasAwaitKeyword    bool
+	CommentsToPreserveBefore    []ast.Comment
+	AllOriginalComments         []ast.Comment
 	// codePointが-1の場合はEOF
 	codePoint                       rune
-	Identifier                      string
+	Identifier                       MaybeSubstring
 	JSXFactoryPragmaComment         location.Span
 	JSXFragmentPragmaComment        location.Span
 	SourceMappingURL                location.Span
@@ -1200,7 +1209,7 @@ func (lexer *Lexer) NextInsideJSXElement() {
 					}
 				}
 
-				lexer.Identifier = lexer.Raw()
+				lexer.Identifier = lexer.rawIdentifier()
 				lexer.Token = TIdentifier
 				break
 			}
@@ -1245,7 +1254,7 @@ func (lexer *Lexer) Next() {
 						break hashbang
 					}
 				}
-				lexer.Identifier = lexer.Raw()
+				lexer.Identifier = lexer.rawIdentifier()
 			} else {
 				// "#foo"
 				lexer.step()
@@ -1262,7 +1271,7 @@ func (lexer *Lexer) Next() {
 					if lexer.codePoint == '\\' {
 						lexer.Identifier, _ = lexer.scanIdentifierWithEscapes(privateIdentifier)
 					} else {
-						lexer.Identifier = lexer.Raw()
+						lexer.Identifier = lexer.rawIdentifier()
 					}
 				}
 				lexer.Token = TPrivateIdentifier
@@ -1773,9 +1782,8 @@ func (lexer *Lexer) Next() {
 			if lexer.codePoint == '\\' {
 				lexer.Identifier, lexer.Token = lexer.scanIdentifierWithEscapes(normalIdentifier)
 			} else {
-				contents := lexer.Raw()
-				lexer.Identifier = contents
-				lexer.Token = Keywords[contents]
+				lexer.Identifier = lexer.rawIdentifier()
+				lexer.Token = Keywords[lexer.Raw()]
 				if lexer.Token == 0 {
 					lexer.Token = TIdentifier
 				}
@@ -1803,7 +1811,7 @@ func (lexer *Lexer) Next() {
 					lexer.Identifier, lexer.Token = lexer.scanIdentifierWithEscapes(normalIdentifier)
 				} else {
 					lexer.Token = TIdentifier
-					lexer.Identifier = lexer.Raw()
+					lexer.Identifier = lexer.rawIdentifier()
 				}
 				break
 			}
@@ -1825,7 +1833,7 @@ const (
 
 // This is an edge case that doesn't really exist in the wild, so it doesn't
 // need to be as fast as possible.
-func (lexer *Lexer) scanIdentifierWithEscapes(kind identifierKind) (string, T) {
+func (lexer *Lexer) scanIdentifierWithEscapes(kind identifierKind) (MaybeSubstring, T) {
 	// First pass: scan over the identifier to see how long it is
 	for {
 		// Scan a unicode escape sequence. There is at least one because that's
@@ -1903,9 +1911,9 @@ func (lexer *Lexer) scanIdentifierWithEscapes(kind identifierKind) (string, T) {
 	//   foo.\u0076\u0061\u0072;
 	//
 	if Keywords[text] != 0 {
-		return text, TEscapedKeyword
+		return MaybeSubstring{String: text}, TEscapedKeyword
 	} else {
-		return text, TIdentifier
+		return MaybeSubstring{String: text}, TIdentifier
 	}
 }
 
@@ -2033,7 +2041,7 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 
 		// Slow path: do we need to re-scan the input as text?
 		if isBigIntegerLiteral || isInvalidLegacyOctalLiteral {
-			text := lexer.Raw()
+			text := lexer.rawIdentifier()
 
 			// Can't use a leading zero for bigint literals
 			if isBigIntegerLiteral && lexer.IsLegacyOctalLiteral {
@@ -2042,14 +2050,14 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 
 			// Filter out underscores
 			if underscoreCount > 0 {
-				bytes := make([]byte, 0, len(text)-underscoreCount)
-				for i := 0; i < len(text); i++ {
-					c := text[i]
+				bytes := make([]byte, 0, len(text.String)-underscoreCount)
+				for i := 0; i < len(text.String); i++ {
+					c := text.String[i]
 					if c != '_' {
 						bytes = append(bytes, c)
 					}
 				}
-				text = string(bytes)
+				text = MaybeSubstring{String: string(bytes)}
 			}
 
 			// Store bigints as text to avoid precision loss
@@ -2057,7 +2065,7 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 				lexer.Identifier = text
 			} else if isInvalidLegacyOctalLiteral {
 				// Legacy octal literals may turn out to be a base 10 literal after all
-				value, _ := strconv.ParseFloat(text, 64)
+				value, _ := strconv.ParseFloat(text.String, 64)
 				lexer.Number = value
 			}
 		}
@@ -2154,23 +2162,23 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 		}
 
 		// Take a slice of the text to parse
-		text := lexer.Raw()
+		text := lexer.rawIdentifier()
 
 		// Filter out underscores
 		if underscoreCount > 0 {
-			bytes := make([]byte, 0, len(text)-underscoreCount)
-			for i := 0; i < len(text); i++ {
-				c := text[i]
+			bytes := make([]byte, 0, len(text.String)-underscoreCount)
+			for i := 0; i < len(text.String); i++ {
+				c := text.String[i]
 				if c != '_' {
 					bytes = append(bytes, c)
 				}
 			}
-			text = string(bytes)
+			text = MaybeSubstring{String: string(bytes)}
 		}
 
 		if lexer.codePoint == 'n' && !hasDotOrExponent {
 			// The only bigint literal that can start with 0 is "0n"
-			if len(text) > 1 && first == '0' {
+			if len(text.String) > 1 && first == '0' {
 				lexer.SyntaxError()
 			}
 
@@ -2179,13 +2187,13 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 		} else if !hasDotOrExponent && lexer.end-lexer.start < 10 {
 			// Parse a 32-bit integer (very fast path)
 			var number uint32 = 0
-			for _, c := range text {
+			for _, c := range text.String {
 				number = number*10 + uint32(c-'0')
 			}
 			lexer.Number = float64(number)
 		} else {
 			// Parse a double-precision floating-point number
-			value, _ := strconv.ParseFloat(text, 64)
+			value, _ := strconv.ParseFloat(text.String, 64)
 			lexer.Number = value
 		}
 	}
@@ -2580,12 +2588,12 @@ func (lexer *Lexer) tryToDecodeEscapeSequences(start int, text string, reportErr
 
 			default:
 				// if lexer.json.parse {
-					switch c2 {
-					case '"', '\\', '/':
+				switch c2 {
+				case '"', '\\', '/':
 
-					default:
-						return nil, false, start + i - width2
-					}
+				default:
+					return nil, false, start + i - width2
+				}
 				// }
 
 				c = c2

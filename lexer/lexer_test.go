@@ -8,7 +8,7 @@ import (
 
 func ConvertStringToSource(t *testing.T, contents string) location.Source {
 	return location.Source{
-		Index:          0,
+		Index: 0,
 		// KeyPath:        logger.Path{Text: "<stdin>"},
 		// PrettyPath:     "<stdin>",
 		Contents:       contents,
